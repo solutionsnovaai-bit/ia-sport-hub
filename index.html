@@ -644,41 +644,64 @@ function errorHTML(msg) { return `<div class="empty-state"><div class="empty-ico
 // ═══════════════════════════════════════════════════════════
 
 // Normaliza um fixture para estrutura interna padrão
-// Formato real da API: { id, leagueId, time, home:{id,score,name,longName}, away:{...}, statusId, utcTime, tournamentStage }
+// Formato real: { id, leagueId, utcTime, home:{score,name,longName}, away:{...},
+//   status:{finished,started,cancelled}, scoreStr:"2 - 1", tournamentStage }
 function norm(f) {
-  const LIVE_IDS = [6,7,8,9,10,11,12,13];
-  const DONE_IDS = [14,15,16,17];
-  const sid = f.statusId || 0;
+  const finished = f.status?.finished === true;
+  const started  = f.status?.started  === true && !finished;
   let status = 'NS';
-  if (LIVE_IDS.includes(sid)) status = 'LIVE';
-  else if (DONE_IDS.includes(sid)) status = 'FT';
+  if (started)  status = 'LIVE';
+  if (finished) status = 'FT';
 
   let timeStr = '--:--';
   if (f.utcTime) {
     timeStr = new Date(f.utcTime).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',timeZone:'America/Sao_Paulo'});
-  } else if (f.time) {
-    const parts = f.time.split(' ');
-    timeStr = parts[1] || f.time;
   }
 
-  const hasScore = status !== 'NS';
+  let homeScore = null, awayScore = null;
+  if (status !== 'NS') {
+    if (f.scoreStr && f.scoreStr !== '? - ?') {
+      const parts = f.scoreStr.split(' - ');
+      if (parts.length === 2) { homeScore = parts[0].trim(); awayScore = parts[1].trim(); }
+    } else if (f.home?.score != null) {
+      homeScore = String(f.home.score);
+      awayScore = String(f.away?.score ?? 0);
+    }
+  }
+
+  const LEAGUE_NAMES = {
+    268:'Brasileirao Serie A', 390:'Copa do Brasil',
+    42:'Champions League', 73:'Europa League',
+    87:'Premier League', 132:'La Liga',
+    54:'Bundesliga', 55:'Serie A TIM', 53:'Ligue 1',
+  };
+  const lid = f.leagueId;
+
   return {
     _raw: f,
     id: f.id,
-    date: f.time || f.utcTime || '',
+    date: f.utcTime || '',
     time: timeStr,
     homeTeam: { name: f.home?.longName || f.home?.name || 'Casa', logo: '' },
     awayTeam: { name: f.away?.longName || f.away?.name || 'Fora', logo: '' },
-    homeScore: (hasScore && f.home?.score != null) ? String(f.home.score) : null,
-    awayScore: (hasScore && f.away?.score != null) ? String(f.away.score) : null,
-    status: status,
-    elapsed: f.elapsed || null,
-    leagueId: f.leagueId || 'other',
-    leagueName: f.leagueName || f.tournament || 'Liga',
+    homeScore, awayScore,
+    status,
+    elapsed: null,
+    leagueId: lid || 'other',
+    leagueName: LEAGUE_NAMES[lid] || ('Liga ' + lid),
     leagueLogo: '',
-    country: f.country || '',
-    round: f.tournamentStage || f.round || '',
+    country: '',
+    round: f.tournamentStage || '',
   };
+}
+
+function isTodayUTC(utcTime) {
+  if (!utcTime) return false;
+  const d = new Date(utcTime);
+  const now = new Date();
+  return d.getUTCFullYear() === now.getUTCFullYear() &&
+         d.getUTCMonth()    === now.getUTCMonth() &&
+         d.getUTCDate()     === now.getUTCDate();
 }
 
 // ── LOAD TODAY — Jogos de Hoje ──
@@ -698,9 +721,10 @@ async function loadTodayFixtures() {
       raw = todayData?.response?.matches || todayData?.result || todayData?.matches || [];
     }
 
-    if (!raw.length) { el.innerHTML = emptyHTML('📅','Nenhum jogo hoje.<br>Tente atualizar mais tarde.'); return; }
+    const todayRaw = raw.filter(m => isTodayUTC(m.utcTime));
+    if (!todayRaw.length) { el.innerHTML = emptyHTML('📅','Nenhum jogo hoje.<br>Tente atualizar mais tarde.'); return; }
 
-    const fixtures = raw.map(norm);
+    const fixtures = todayRaw.map(norm);
     const leagues = {};
     fixtures.forEach(f => {
       const k = f.leagueId || 'other';
@@ -762,7 +786,7 @@ async function loadBrasileiraoData() {
   
   el.innerHTML = loadingHTML();
   try {
-    const data = await apiCall(`/football-get-all-matches-by-league?leagueid=71`);
+    const data = await apiCall(`/football-get-all-matches-by-league?leagueid=268`);
     const raw = data?.response?.matches || data?.result || data?.matches || [];
     if (!raw.length) { el.innerHTML = emptyHTML('🇧🇷','Nenhum jogo do Brasileirão encontrado.'); return; }
     const fixtures = raw.map(norm);
