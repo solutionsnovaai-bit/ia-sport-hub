@@ -656,6 +656,9 @@ function norm(f) {
   let timeStr = '--:--';
   if (f.utcTime) {
     timeStr = new Date(f.utcTime).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',timeZone:'America/Sao_Paulo'});
+  } else if (f.time) {
+    const tp = f.time.split(' ');
+    if (tp[1]) timeStr = tp[1];
   }
 
   let homeScore = null, awayScore = null;
@@ -695,13 +698,20 @@ function norm(f) {
   };
 }
 
-function isTodayUTC(utcTime) {
-  if (!utcTime) return false;
-  const d = new Date(utcTime);
-  const now = new Date();
-  return d.getUTCFullYear() === now.getUTCFullYear() &&
-         d.getUTCMonth()    === now.getUTCMonth() &&
-         d.getUTCDate()     === now.getUTCDate();
+function isTodayMatch(f) {
+  // usa utcTime se disponível, senão time "DD.MM.YYYY HH:MM"
+  const iso = getTodayISO(); // "YYYYMMDD"
+  const yr = iso.slice(0,4), mo = iso.slice(4,6), dy = iso.slice(6,8);
+  if (f.utcTime) {
+    const d = new Date(f.utcTime);
+    return d.getUTCFullYear() === +yr && (d.getUTCMonth()+1) === +mo && d.getUTCDate() === +dy;
+  }
+  if (f.time) {
+    // formato "25.05.2026 14:30" → day=25 mo=05 yr=2026
+    const parts = f.time.split(' ')[0].split('.');
+    return parts[2] === yr && parts[1] === mo && parts[0] === dy;
+  }
+  return true; // sem data, inclui por precaução
 }
 
 // ── LOAD TODAY — Jogos de Hoje ──
@@ -721,7 +731,7 @@ async function loadTodayFixtures() {
       raw = todayData?.response?.matches || todayData?.result || todayData?.matches || [];
     }
 
-    const todayRaw = raw.filter(m => isTodayUTC(m.utcTime));
+    const todayRaw = raw.filter(m => isTodayMatch(m));
     if (!todayRaw.length) { el.innerHTML = emptyHTML('📅','Nenhum jogo hoje.<br>Tente atualizar mais tarde.'); return; }
 
     const fixtures = todayRaw.map(norm);
